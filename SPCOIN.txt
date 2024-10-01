@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract SPCOIN is ERC20, Ownable {
+    uint256 public transactionFee = 2; // Fee percentage (e.g., 2%)
+    address public feeCollector = 0xDE01858bB4950CF27F128C00d6C8e4aE7371f175; // Correct checksummed address
+
+    // Event to log withdrawals
+    event Withdrawal(uint amount, uint when);
+    event Buy(address indexed buyer, uint256 amount, uint256 fee);
+    event Sell(address indexed seller, uint256 amount, uint256 fee);
+
+    // Constructor to initialize the contract with an initial supply and set the owner
+    constructor(uint256 initialSupply) 
+        ERC20("Sunday_Prince_Coin", "SPCOIN") 
+        Ownable(msg.sender) // Pass the contract deployer as the owner
+    {
+        _mint(msg.sender, initialSupply); // Mint initial supply to the owner
+    }
+
+    // Function to mint new tokens (only owner can do this)
+    function mint(address to, uint256 amount) public onlyOwner {
+        _mint(to, amount);
+    }
+
+    // Function to burn tokens (any holder can burn their tokens)
+    function burn(uint256 amount) public {
+        _burn(msg.sender, amount);
+    }
+
+    // Function to withdraw funds (only owner can do this)
+    function withdraw() public onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+
+        emit Withdrawal(balance, block.timestamp); // Log the withdrawal event
+
+        payable(owner()).transfer(balance); // Transfer the contract balance to the owner
+    }
+
+    // Function to set the transaction fee percentage (only owner can do this)
+    function setTransactionFee(uint256 fee) external onlyOwner {
+        require(fee <= 100, "Fee too high");
+        transactionFee = fee;
+    }
+
+    // Function to set a new fee collector (only owner can do this)
+    function setFeeCollector(address _feeCollector) external onlyOwner {
+        feeCollector = _feeCollector;
+    }
+
+    // Override the transfer function to include a fee
+    function transfer(address recipient, uint256 amount) public override returns (bool) {
+        return _transferWithFee(msg.sender, recipient, amount);
+    }
+
+    // Override the transferFrom function to include a fee
+    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
+        uint256 currentAllowance = allowance(sender, _msgSender());
+        require(currentAllowance >= amount, "ERC20: transfer amount exceeds allowance");
+        _approve(sender, _msgSender(), currentAllowance - amount);
+
+        return _transferWithFee(sender, recipient, amount);
+    }
+
+    // Internal function to handle transfers with fee deduction
+    function _transferWithFee(address sender, address recipient, uint256 amount) internal returns (bool) {
+        uint256 feeAmount = (amount * transactionFee) / 100; // Calculate fee
+        uint256 transferAmount = amount - feeAmount; // Calculate amount after fee
+
+        require(balanceOf(sender) >= amount, "Insufficient balance");
+
+        // Transfer the fee to the feeCollector
+        _transfer(sender, feeCollector, feeAmount);
+        // Transfer the remaining amount to the recipient
+        _transfer(sender, recipient, transferAmount);
+
+        return true;
+    }
+
+    // Function to simulate buying tokens
+    function buy() external payable {
+        require(msg.value > 0, "You need to send ETH to buy tokens");
+        
+        // Calculate the amount of tokens to purchase based on some exchange rate
+        uint256 amount = msg.value * 100; 
+        uint256 feeAmount = (amount * transactionFee) / 100; // Calculate fee
+
+        // Ensure the contract has enough tokens for the purchase
+        require(balanceOf(owner()) >= amount, "Not enough tokens available for sale");
+
+        // Transfer tokens to the buyer
+        _transfer(owner(), msg.sender, amount); 
+        // Transfer fee to the fee collector
+        payable(feeCollector).transfer(feeAmount);
+
+        emit Buy(msg.sender, amount, feeAmount);
+    }
+
+    // Function to simulate selling tokens
+    function sell(uint256 amount) external {
+        require(balanceOf(msg.sender) >= amount, "Insufficient token balance to sell");
+
+        uint256 feeAmount = (amount * transactionFee) / 100; // Calculate fee
+        uint256 sellAmount = amount - feeAmount; // Amount after fee
+
+        // Transfer tokens from seller to contract (to 'sell' tokens)
+        _transfer(msg.sender, address(this), amount); 
+        // Transfer ETH to the seller
+        payable(msg.sender).transfer(sellAmount); // Send sell amount in ETH
+        // Transfer fee to the fee collector
+        payable(feeCollector).transfer(feeAmount);
+
+        emit Sell(msg.sender, amount, feeAmount);
+    }
+
+    // Fallback function to accept ETH deposits
+    receive() external payable {}
+}
